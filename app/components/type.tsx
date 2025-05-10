@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react";
+import TimerBar from "./timerBar";
+import { useTimeStore } from "../store/time";
+import getWordList from "../actions/getWordList";
 
-const wordsList = ["hello", "world", "zentype", "is", "awesome"];
 const cursorKeyframes = `
   @keyframes blink {
     0%, 100% { opacity: 1; }
@@ -12,16 +14,41 @@ const cursorKeyframes = `
 
 const cursorStyle = {
     animation: 'blink 1s step-end infinite',
+    transition: 'all 0.03s linear', 
 };
 
+function getLines(words: string[], wordsPerLine: number): string[][] {
+    const lines: string[][] = [];
+    for (let i = 0; i < words.length; i += wordsPerLine) {
+        lines.push(words.slice(i, Math.min(i + wordsPerLine, words.length)));
+    }
+    return lines;
+}
+
 export default function TypingTest() {
+    const [visibleLines, setVisibleLines] = useState(3);
+    const activeDuration = useTimeStore((state) => state.activeDuration);
+    const [wordsList, setWordsList] = useState<string[]>([]);
     const [currentLetterIndex, setCurrentLetterIndex] = useState(0);
     const [currentWordIdx, setCurrentWordIdx] = useState(0);
     const [inputWord, setInputWord] = useState("");
     const [completedLetters, setCompletedLetters] = useState<string[]>([]);
     const [typedWordsHistory, setTypedWordsHistory] = useState<string[][]>(() => wordsList.map(() => []));
+    const wordsPerLine = 15;
 
-    const actualWord = wordsList[currentWordIdx] || "";
+    useEffect(() => {
+        async function fetch() {
+            const words = await getWordList({ time: activeDuration });
+            setWordsList(words);
+            setTypedWordsHistory(words.map(() => []));
+            setCurrentLetterIndex(0);
+            setCurrentWordIdx(0);
+            setInputWord("");
+            setCompletedLetters([]);
+            setVisibleLines(3);
+        }
+        fetch();
+    }, [activeDuration]);
 
     const handleLetter = useCallback((letter: string) => {
         setInputWord((prev) => prev + letter);
@@ -44,11 +71,16 @@ export default function TypingTest() {
             return newHistory;
         });
 
+        const currentLine = Math.floor(currentWordIdx / wordsPerLine);
+        if (currentLine >= visibleLines - 1) {
+            setVisibleLines(prev => prev + 1);
+        }
+    
         setCompletedLetters([]);
         setInputWord("");
         setCurrentLetterIndex(0);
         setCurrentWordIdx(prev => prev + 1);
-    }, [currentWordIdx, completedLetters, wordsList.length]);
+    }, [currentWordIdx, completedLetters, wordsList.length, visibleLines, wordsPerLine]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -119,12 +151,11 @@ export default function TypingTest() {
                 </div>
 
                 <span
-                    className="absolute bottom-2 w-[2px] h-[1.1em] bg-yellow-600"
+                    className="absolute bottom-2 w-[2px] h-[1.1em] bg-teal-400"
                     style={{
                         ...cursorStyle,
                         left: `${currentLetterIndex}ch`,
-                        transition: 'left 0.1s ease-out',
-                        transform: 'translateY(2px)'
+                        transform: 'translateY(2px)', 
                     }}
                 />
             </div>
@@ -178,18 +209,36 @@ export default function TypingTest() {
 
     return (
         <div className="flex flex-col items-center justify-center min-h-screen text-gray-600 font-mono">
-            <div className="p-6">
-                <div className="flex flex-wrap text-2xl mb-4 gap-x-3 gap-y-2 leading-relaxed">
-                    {wordsList.map((word, index) => {
-                        if (index === currentWordIdx) {
-                            return renderCurrentWord();
-                        } else if (typedWordsHistory[index] && typedWordsHistory[index].length > 0 || (index < currentWordIdx && word.length > 0) ) {
-                            const attempt = typedWordsHistory[index] || [];
-                            return renderPreviouslyTypedWord(word, attempt, index);
-                        } else {
-                           return renderFutureWord(word, index);
-                        }
-                    })}
+            <TimerBar />
+            <div className="w-full max-w-[950px] py-20 mx-auto">
+                <div className="relative mx-auto">
+                    <div className="text-3xl leading-relaxed space-y-4">
+                        {getLines(wordsList, wordsPerLine)
+                            .slice(Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1), 
+                                   Math.max(3, Math.floor(currentWordIdx / wordsPerLine) + 2))
+                            .map((line, lineIndex) => (
+                                <div
+                                    key={`line-${lineIndex}`}
+                                    className="flex gap-2 justify-center" 
+                                >
+                                    {line.map((word, wordIndex) => {
+                                        const globalWordIndex = 
+                                            (Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1) + lineIndex) 
+                                            * wordsPerLine + wordIndex;
+                                        
+                                        if (globalWordIndex === currentWordIdx) {
+                                            return renderCurrentWord();
+                                        } else if (typedWordsHistory[globalWordIndex]?.length > 0 || 
+                                                 globalWordIndex < currentWordIdx) {
+                                            const attempt = typedWordsHistory[globalWordIndex] || [];
+                                            return renderPreviouslyTypedWord(word, attempt, globalWordIndex);
+                                        } else {
+                                            return renderFutureWord(word, globalWordIndex);
+                                        }
+                                    })}
+                                </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
