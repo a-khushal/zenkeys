@@ -1,4 +1,4 @@
-import TypingTest from "./components/type";
+import TypingTest from "../components/type";
 
 export default function Home() {
   return (

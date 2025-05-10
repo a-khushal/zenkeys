@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import TimerBar from "./timerBar";
 import { useTimeStore } from "../store/time";
-import getWordList from "../actions/getWordList";
+import getWordList from "../app/actions/getWordList";
 
 const cursorKeyframes = `
   @keyframes blink {
@@ -34,7 +34,7 @@ export default function TypingTest() {
     const [inputWord, setInputWord] = useState("");
     const [completedLetters, setCompletedLetters] = useState<string[]>([]);
     const [typedWordsHistory, setTypedWordsHistory] = useState<string[][]>(() => wordsList.map(() => []));
-    const wordsPerLine = 15;
+    const wordsPerLine = 13;
 
     useEffect(() => {
         async function fetch() {

@@ -1,6 +1,6 @@
 'use server'
 
-import { TimerDuration } from "../utils/time";
+import { TimerDuration } from "../../utils/time";
 const WORDS = {
     "rawWordList": [
         "about", "another", "concept", "after", "again", "air", "all", "also", "balance", "always", 
