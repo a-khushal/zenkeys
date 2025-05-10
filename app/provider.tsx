@@ -1,7 +1,7 @@
 "use client"
 
 import { RecoilRoot } from "recoil"
-import { ThemeProvider } from "./components/themeProvider"
+import { ThemeProvider } from "../components/themeProvider"
 
 export default function Provider({ children }: {
     children: React.ReactNode
