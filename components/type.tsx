@@ -12,9 +12,41 @@ const cursorKeyframes = `
   }
 `;
 
-const cursorStyle = {
-    animation: 'blink 0.8s step-end infinite',
+const nonBlinkingCursorStyle = {
     transition: 'all 0.05s linear',
+};
+
+const blinkingCursorStyle = {
+    ...nonBlinkingCursorStyle,
+    animation: 'blink 1.1s step-end infinite',
+};
+
+const overlayStyle = {
+    position: 'fixed' as const,
+    top: 0,
+    left: 0,
+    width: '100%' as const,
+    height: '100%' as const,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)' as const,
+    zIndex: 1000,
+    display: 'flex' as const,
+    flexDirection: 'column' as const, // To stack text and button
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    color: 'white' as const,
+    fontSize: '24px' as const,
+    fontWeight: 'bold' as const,
+    gap: '20px', // Space between text and button
+};
+
+const restartButtonStyle = {
+    padding: '10px 20px',
+    fontSize: '1.5rem',
+    backgroundColor: 'teal',
+    color: 'white',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
 };
 
 function getLines(words: string[], wordsPerLine: number): string[][] {
@@ -39,8 +71,10 @@ export default function TypingTest() {
     const wordsPerLine = 13;
 
     const [isRunning, setIsRunning] = useState(false);
+    const [hasStartedTyping, setHasStartedTyping] = useState(false);
     const [timeLeft, setTimeLeft] = useState<number>(activeDuration);
     const timerInterval = useRef<NodeJS.Timeout | null>(null);
+    const [testEnded, setTestEnded] = useState(false);
 
     useEffect(() => {
         async function fetch() {
@@ -53,7 +87,9 @@ export default function TypingTest() {
             setCompletedLetters([]);
             setVisibleLines(3);
             setIsRunning(false);
+            setHasStartedTyping(false);
             setTimeLeft(activeDuration);
+            setTestEnded(false);
             if (timerInterval.current) {
                 clearInterval(timerInterval.current);
                 timerInterval.current = null;
@@ -73,9 +109,10 @@ export default function TypingTest() {
                 clearInterval(timerInterval.current);
                 timerInterval.current = null;
             }
+            setTestEnded(true);
             console.log("Timer expired!");
         }
-    
+
         return () => {
             if (timerInterval.current) {
                 clearInterval(timerInterval.current);
@@ -84,36 +121,41 @@ export default function TypingTest() {
     }, [isRunning, timeLeft]);
 
     const startTimer = useCallback(() => {
-        if (!isRunning) {
+        if (!isRunning && !testEnded) {
             setIsRunning(true);
         }
-    }, [isRunning]);
+    }, [isRunning, testEnded]);
 
     const handleLetter = useCallback((letter: string) => {
-        if (!isRunning) {
+        if (!isRunning && !testEnded) {
             startTimer();
+            setInputWord(letter);
+            setCompletedLetters([letter]);
+            setCurrentLetterIndex(1);
+            setHasStartedTyping(true);
             return;
         }
-        if (isRunning) {
+        if (isRunning && !testEnded) {
             setInputWord((prev) => prev + letter);
             setCompletedLetters((prev) => [...prev, letter]);
             setCurrentLetterIndex((prev) => prev + 1);
         }
-    }, [isRunning, startTimer]);
+    }, [isRunning, startTimer, testEnded]);
 
     const handleBackspace = useCallback(() => {
-        if (isRunning) {
+        if (isRunning && !testEnded) {
             setInputWord((prev) => prev.slice(0, -1));
             setCompletedLetters((prev) => prev.slice(0, -1));
             setCurrentLetterIndex((prev) => Math.max(0, prev - 1));
         }
-    }, [isRunning]);
+    }, [isRunning, testEnded]);
 
     const handleWordComplete = useCallback(() => {
-        if (!isRunning) {
+        if (!isRunning && !testEnded) {
             startTimer();
+            setHasStartedTyping(true);
         }
-        if (isRunning) {
+        if (isRunning && !testEnded) {
             setTypedWordsHistory(prevHistory => {
                 const newHistory = [...prevHistory];
                 if (currentWordIdx < newHistory.length) {
@@ -132,7 +174,26 @@ export default function TypingTest() {
             setCurrentLetterIndex(0);
             setCurrentWordIdx(prev => prev + 1);
         }
-    }, [currentWordIdx, completedLetters, wordsList.length, visibleLines, wordsPerLine, isRunning, startTimer]);
+    }, [currentWordIdx, completedLetters, visibleLines, wordsPerLine, isRunning, startTimer, testEnded]);
+
+    const restartTest = useCallback(async () => {
+        const words = await getWordList({ time: activeDuration });
+        setWordsList(words);
+        setTypedWordsHistory(words.map(() => []));
+        setCurrentLetterIndex(0);
+        setCurrentWordIdx(0);
+        setInputWord("");
+        setCompletedLetters([]);
+        setVisibleLines(3);
+        setIsRunning(false);
+        setHasStartedTyping(false);
+        setTimeLeft(activeDuration);
+        setTestEnded(false);
+        if (timerInterval.current) {
+            clearInterval(timerInterval.current);
+            timerInterval.current = null;
+        }
+    }, [activeDuration]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -147,12 +208,19 @@ export default function TypingTest() {
                 return;
             }
 
+            if (testEnded) {
+                e.preventDefault();
+                return;
+            }
+
             const currentActualWord = wordsList[currentWordIdx] || "";
 
             if (key === " ") {
                 e.preventDefault();
                 if (inputWord.length > 0 || completedLetters.length > 0 || currentActualWord) {
                     handleWordComplete();
+                } else if (!hasStartedTyping && isRunning) {
+                    setHasStartedTyping(true);
                 }
             } else if (key.length === 1 && !ctrlKey && !metaKey && !altKey) {
                 e.preventDefault();
@@ -166,11 +234,12 @@ export default function TypingTest() {
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
         }
-    }, [handleLetter, handleBackspace, handleWordComplete, currentWordIdx, inputWord, completedLetters, wordsList, isRunning, timeLeft]);
+    }, [handleLetter, handleBackspace, handleWordComplete, currentWordIdx, inputWord, completedLetters, wordsList, isRunning, timeLeft, testEnded, hasStartedTyping]);
 
 
     const renderCurrentWord = () => {
         const displayActualWord = wordsList[currentWordIdx] || "";
+        const currentCursorStyle = !hasStartedTyping && !testEnded ? blinkingCursorStyle : nonBlinkingCursorStyle;
 
         return (
             <div key={`current-${currentWordIdx}`} className="flex items-center relative">
@@ -205,11 +274,11 @@ export default function TypingTest() {
                 </div>
 
                 <span
-                    className="absolute bottom-2 w-[2px] h-[1.1em] bg-teal-400"
+                    className="absolute bottom-2 w-[3px] h-[1.3em] bg-teal-400"
                     style={{
-                        ...cursorStyle,
+                        ...currentCursorStyle,
                         left: `${currentLetterIndex}ch`,
-                        transform: 'translateY(2px)',
+                        transform: 'translateY(4px)',
                     }}
                 />
             </div>
@@ -230,7 +299,7 @@ export default function TypingTest() {
                     if (typedChar === undefined) {
                         letterClass = "text-red-500";
                     } else if (typedChar === char) {
-                        letterClass = "dark:text-white text-white";
+                        letterClass = "dark:text-white text-black";
                     } else {
                         letterClass = "text-red-500";
                     }
@@ -262,7 +331,7 @@ export default function TypingTest() {
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen text-gray-600 font-mono">
+        <div className={`flex flex-col items-center justify-center min-h-screen text-gray-600 font-mono ${testEnded ? 'opacity-50' : ''}`}>
             <TimerBar />
             <div className="mt-10">
                 <div className="text-xl font-semibold text-teal-400">{timeLeft}</div>
@@ -298,6 +367,14 @@ export default function TypingTest() {
                     </div>
                 </div>
             </div>
+            {testEnded && (
+                <div style={overlayStyle}>
+                    <span>Test Ended</span>
+                    <button onClick={restartTest} style={restartButtonStyle}>
+                        &gt;
+                    </button>
+                </div>
+            )}
         </div>
     );
 }
