@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import TimerBar from "./timerBar";
 import { useTimeStore } from "../store/time";
 import getWordList from "../app/actions/getWordList";
@@ -13,15 +13,17 @@ const cursorKeyframes = `
 `;
 
 const cursorStyle = {
-    animation: 'blink 1s step-end infinite',
-    transition: 'all 0.03s linear', 
+    animation: 'blink 0.8s step-end infinite',
+    transition: 'all 0.05s linear',
 };
 
 function getLines(words: string[], wordsPerLine: number): string[][] {
     const lines: string[][] = [];
+
     for (let i = 0; i < words.length; i += wordsPerLine) {
         lines.push(words.slice(i, Math.min(i + wordsPerLine, words.length)));
     }
+
     return lines;
 }
 
@@ -36,6 +38,10 @@ export default function TypingTest() {
     const [typedWordsHistory, setTypedWordsHistory] = useState<string[][]>(() => wordsList.map(() => []));
     const wordsPerLine = 13;
 
+    const [isRunning, setIsRunning] = useState(false);
+    const [timeLeft, setTimeLeft] = useState<number>(activeDuration);
+    const timerInterval = useRef<NodeJS.Timeout | null>(null);
+
     useEffect(() => {
         async function fetch() {
             const words = await getWordList({ time: activeDuration });
@@ -46,41 +52,87 @@ export default function TypingTest() {
             setInputWord("");
             setCompletedLetters([]);
             setVisibleLines(3);
+            setIsRunning(false);
+            setTimeLeft(activeDuration);
+            if (timerInterval.current) {
+                clearInterval(timerInterval.current);
+                timerInterval.current = null;
+            }
         }
         fetch();
     }, [activeDuration]);
 
-    const handleLetter = useCallback((letter: string) => {
-        setInputWord((prev) => prev + letter);
-        setCompletedLetters((prev) => [...prev, letter]);
-        setCurrentLetterIndex((prev) => prev + 1);
-    }, []);
-
-    const handleBackspace = useCallback(() => {
-        setInputWord((prev) => prev.slice(0, -1));
-        setCompletedLetters((prev) => prev.slice(0, -1));
-        setCurrentLetterIndex((prev) => Math.max(0, prev - 1));
-    }, []);
-
-    const handleWordComplete = useCallback(() => {
-        setTypedWordsHistory(prevHistory => {
-            const newHistory = [...prevHistory];
-            if (currentWordIdx < newHistory.length) {
-                newHistory[currentWordIdx] = [...completedLetters];
+    useEffect(() => {
+        if (isRunning && timeLeft > 0) {
+            timerInterval.current = setInterval(() => {
+                setTimeLeft((prev) => prev - 1);
+            }, 1000);
+        } else if (timeLeft === 0) {
+            setIsRunning(false);
+            if (timerInterval.current) {
+                clearInterval(timerInterval.current);
+                timerInterval.current = null;
             }
-            return newHistory;
-        });
-
-        const currentLine = Math.floor(currentWordIdx / wordsPerLine);
-        if (currentLine >= visibleLines - 1) {
-            setVisibleLines(prev => prev + 1);
+            console.log("Timer expired!");
         }
     
-        setCompletedLetters([]);
-        setInputWord("");
-        setCurrentLetterIndex(0);
-        setCurrentWordIdx(prev => prev + 1);
-    }, [currentWordIdx, completedLetters, wordsList.length, visibleLines, wordsPerLine]);
+        return () => {
+            if (timerInterval.current) {
+                clearInterval(timerInterval.current);
+            }
+        };
+    }, [isRunning, timeLeft]);
+
+    const startTimer = useCallback(() => {
+        if (!isRunning) {
+            setIsRunning(true);
+        }
+    }, [isRunning]);
+
+    const handleLetter = useCallback((letter: string) => {
+        if (!isRunning) {
+            startTimer();
+            return;
+        }
+        if (isRunning) {
+            setInputWord((prev) => prev + letter);
+            setCompletedLetters((prev) => [...prev, letter]);
+            setCurrentLetterIndex((prev) => prev + 1);
+        }
+    }, [isRunning, startTimer]);
+
+    const handleBackspace = useCallback(() => {
+        if (isRunning) {
+            setInputWord((prev) => prev.slice(0, -1));
+            setCompletedLetters((prev) => prev.slice(0, -1));
+            setCurrentLetterIndex((prev) => Math.max(0, prev - 1));
+        }
+    }, [isRunning]);
+
+    const handleWordComplete = useCallback(() => {
+        if (!isRunning) {
+            startTimer();
+        }
+        if (isRunning) {
+            setTypedWordsHistory(prevHistory => {
+                const newHistory = [...prevHistory];
+                if (currentWordIdx < newHistory.length) {
+                    newHistory[currentWordIdx] = [...completedLetters];
+                }
+                return newHistory;
+            });
+
+            const currentLine = Math.floor(currentWordIdx / wordsPerLine);
+            if (currentLine >= visibleLines - 1) {
+                setVisibleLines(prev => prev + 1);
+            }
+
+            setCompletedLetters([]);
+            setInputWord("");
+            setCurrentLetterIndex(0);
+            setCurrentWordIdx(prev => prev + 1);
+        }
+    }, [currentWordIdx, completedLetters, wordsList.length, visibleLines, wordsPerLine, isRunning, startTimer]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -90,11 +142,16 @@ export default function TypingTest() {
                 return;
             }
 
+            if (!isRunning && timeLeft === 0) {
+                e.preventDefault();
+                return;
+            }
+
             const currentActualWord = wordsList[currentWordIdx] || "";
 
             if (key === " ") {
                 e.preventDefault();
-                if (inputWord.length > 0 || completedLetters.length > 0 || currentActualWord ) {
+                if (inputWord.length > 0 || completedLetters.length > 0 || currentActualWord) {
                     handleWordComplete();
                 }
             } else if (key.length === 1 && !ctrlKey && !metaKey && !altKey) {
@@ -109,17 +166,14 @@ export default function TypingTest() {
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
         }
-    }, [handleLetter, handleBackspace, handleWordComplete, currentWordIdx, inputWord, completedLetters, wordsList]);
+    }, [handleLetter, handleBackspace, handleWordComplete, currentWordIdx, inputWord, completedLetters, wordsList, isRunning, timeLeft]);
 
 
     const renderCurrentWord = () => {
         const displayActualWord = wordsList[currentWordIdx] || "";
 
         return (
-            <div
-                key={`current-${currentWordIdx}`}
-                className="flex items-center relative"
-            >
+            <div key={`current-${currentWordIdx}`} className="flex items-center relative">
                 <style>{cursorKeyframes}</style>
 
                 <div className="flex relative font-mono">
@@ -132,8 +186,8 @@ export default function TypingTest() {
                         }
 
                         return (
-                            <span 
-                                key={`current-char-${idx}`} 
+                            <span
+                                key={`current-char-${idx}`}
                                 className={`${letterClass} w-[1ch]`}
                             >
                                 {char}
@@ -155,7 +209,7 @@ export default function TypingTest() {
                     style={{
                         ...cursorStyle,
                         left: `${currentLetterIndex}ch`,
-                        transform: 'translateY(2px)', 
+                        transform: 'translateY(2px)',
                     }}
                 />
             </div>
@@ -165,7 +219,7 @@ export default function TypingTest() {
     const renderPreviouslyTypedWord = (wordToRender: string, typedAttempt: string[], wordIdx: number) => {
         const actualChars = wordToRender.split("");
         const hasError = typedAttempt.some((char, idx) => idx >= actualChars.length || char !== actualChars[idx]) ||
-                        typedAttempt.length !== actualChars.length;
+            typedAttempt.length !== actualChars.length;
 
         return (
             <div key={`typed-${wordIdx}`} className={`flex items-center ${hasError ? "underline decoration-red-500 decoration-1" : ""}`}>
@@ -210,26 +264,29 @@ export default function TypingTest() {
     return (
         <div className="flex flex-col items-center justify-center min-h-screen text-gray-600 font-mono">
             <TimerBar />
-            <div className="w-full max-w-[950px] py-20 mx-auto">
+            <div className="mt-10">
+                <div className="text-xl font-semibold text-teal-400">{timeLeft}</div>
+            </div>
+            <div className="w-full max-w-[950px] py-10 mx-auto">
                 <div className="relative mx-auto">
                     <div className="text-3xl leading-relaxed space-y-4">
                         {getLines(wordsList, wordsPerLine)
-                            .slice(Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1), 
-                                   Math.max(3, Math.floor(currentWordIdx / wordsPerLine) + 2))
+                            .slice(Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1),
+                                Math.max(3, Math.floor(currentWordIdx / wordsPerLine) + 2))
                             .map((line, lineIndex) => (
                                 <div
                                     key={`line-${lineIndex}`}
-                                    className="flex gap-2 justify-center" 
+                                    className="flex gap-3 justify-center"
                                 >
                                     {line.map((word, wordIndex) => {
-                                        const globalWordIndex = 
-                                            (Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1) + lineIndex) 
+                                        const globalWordIndex =
+                                            (Math.max(0, Math.floor(currentWordIdx / wordsPerLine) - 1) + lineIndex)
                                             * wordsPerLine + wordIndex;
-                                        
+
                                         if (globalWordIndex === currentWordIdx) {
                                             return renderCurrentWord();
-                                        } else if (typedWordsHistory[globalWordIndex]?.length > 0 || 
-                                                 globalWordIndex < currentWordIdx) {
+                                        } else if (typedWordsHistory[globalWordIndex]?.length > 0 ||
+                                            globalWordIndex < currentWordIdx) {
                                             const attempt = typedWordsHistory[globalWordIndex] || [];
                                             return renderPreviouslyTypedWord(word, attempt, globalWordIndex);
                                         } else {
@@ -237,7 +294,7 @@ export default function TypingTest() {
                                         }
                                     })}
                                 </div>
-                        ))}
+                            ))}
                     </div>
                 </div>
             </div>
