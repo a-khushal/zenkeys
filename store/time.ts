@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { TimerDuration, TimerOption } from '../utils/time';
+import { TimerDuration, TimerOption } from '../lib/time';
 
 type TimeStore = {
     activeOption: TimerOption;

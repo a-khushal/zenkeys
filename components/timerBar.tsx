@@ -4,7 +4,7 @@ import { useRecoilState } from "recoil"
 import { Clock, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTimeStore } from "../store/time"
-import { TimerDuration } from "../utils/time"
+import { TimerDuration } from "../lib/time"
 
 export default function TimerBar() {
     const activeOption = useTimeStore((state) => state.activeOption);
