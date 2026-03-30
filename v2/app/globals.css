@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+:root {
+  --background: #e9e9e9;
+  --foreground: #202020;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), "Sohne", "Avenir Next", "Helvetica Neue", sans-serif;
+}
