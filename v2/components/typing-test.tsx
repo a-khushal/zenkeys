@@ -9,19 +9,9 @@ import {
   type TestDuration,
 } from "@/lib/word-bank";
 
-type KeyboardColorway = "light-gold" | "silver-frost" | "graphite";
-
 const DEFAULT_DURATION: TestDuration = 60;
 const INITIAL_WORDS = createStaticWordBatch(DEFAULT_DURATION);
 const TIMER_OPTIONS: TestDuration[] = [15, 30, 60];
-
-const SWITCH_OPTIONS = ["NovelKeys Creams", "Gateron Oil King", "Cherry MX Brown"];
-
-const COLOR_OPTIONS: Array<{ id: KeyboardColorway; label: string }> = [
-  { id: "light-gold", label: "Light Gold" },
-  { id: "silver-frost", label: "Silver Frost" },
-  { id: "graphite", label: "Graphite Gray" },
-];
 
 function getCorrectCharCount(expected: string, typed: string): number {
   const max = Math.min(expected.length, typed.length);
@@ -44,6 +34,7 @@ function formatClock(seconds: number): string {
 
 export function TypingTest() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const wordsViewportRef = useRef<HTMLDivElement>(null);
 
   const [duration, setDuration] = useState<TestDuration>(DEFAULT_DURATION);
   const [words, setWords] = useState<string[]>(INITIAL_WORDS);
@@ -54,10 +45,9 @@ export function TypingTest() {
   const [isRunning, setIsRunning] = useState(false);
   const [testEnded, setTestEnded] = useState(false);
   const [pressedCodes, setPressedCodes] = useState<Set<string>>(() => new Set());
+  const [lineStarts, setLineStarts] = useState<number[]>([0]);
 
-  const [switchPack, setSwitchPack] = useState(SWITCH_OPTIONS[0]);
   const [boardId, setBoardId] = useState(KEYBOARD_PROFILES[0].id);
-  const [colorway, setColorway] = useState<KeyboardColorway>("light-gold");
   const [muted, setMuted] = useState(false);
 
   const activeProfile =
@@ -114,16 +104,80 @@ export function TypingTest() {
     setCurrentInput("");
   }, [appendWords, currentInput, currentWordIndex, isRunning, testEnded, words.length]);
 
-  const cycleDuration = useCallback(() => {
-    const current = TIMER_OPTIONS.indexOf(duration);
-    const nextDuration = TIMER_OPTIONS[(current + 1) % TIMER_OPTIONS.length];
-    setDuration(nextDuration);
-    resetSession(nextDuration);
-  }, [duration, resetSession]);
+  const selectDuration = useCallback(
+    (nextDuration: TestDuration) => {
+      setDuration(nextDuration);
+      resetSession(nextDuration);
+    },
+    [resetSession],
+  );
+
+  const recalculateLineStarts = useCallback(() => {
+    const viewport = wordsViewportRef.current;
+    if (!viewport || words.length === 0) {
+      setLineStarts([0]);
+      return;
+    }
+
+    const maxWidth = viewport.clientWidth;
+    if (maxWidth <= 0) {
+      return;
+    }
+
+    const style = window.getComputedStyle(viewport);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const spaceWidth = context.measureText(" ").width;
+    const starts: number[] = [0];
+    let lineWidth = 0;
+
+    for (let i = 0; i < words.length; i += 1) {
+      const wordWidth = context.measureText(words[i]).width;
+      const nextWidth = lineWidth === 0 ? wordWidth : lineWidth + spaceWidth + wordWidth;
+
+      if (nextWidth > maxWidth && lineWidth > 0) {
+        starts.push(i);
+        lineWidth = wordWidth;
+      } else {
+        lineWidth = nextWidth;
+      }
+    }
+
+    setLineStarts(starts);
+  }, [words]);
 
   useEffect(() => {
     focusInput();
   }, [focusInput]);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      recalculateLineStarts();
+    });
+
+    const viewport = wordsViewportRef.current;
+    if (!viewport) {
+      window.cancelAnimationFrame(frameId);
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(() => {
+        recalculateLineStarts();
+      });
+    });
+    observer.observe(viewport);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [recalculateLineStarts]);
 
   useEffect(() => {
     if (!isRunning || testEnded) {
@@ -246,18 +300,73 @@ export function TypingTest() {
     };
   }, [attempts, currentInput, currentWordIndex, duration, timeLeft, words]);
 
-  const visibleStart = Math.max(0, currentWordIndex - 10);
-  const visibleEnd = Math.min(words.length, currentWordIndex + 22);
-  const visibleWords = words.slice(visibleStart, visibleEnd);
+  const visibleWindow = useMemo(() => {
+    if (lineStarts.length === 0) {
+      return { startWordIndex: 0, endWordIndex: Math.min(words.length, 40) };
+    }
+
+    let currentLine = 0;
+    for (let i = 0; i < lineStarts.length; i += 1) {
+      if (lineStarts[i] <= currentWordIndex) {
+        currentLine = i;
+      } else {
+        break;
+      }
+    }
+
+    const maxStartLine = Math.max(0, lineStarts.length - 3);
+    const startLine = Math.min(currentLine, maxStartLine);
+    const endLineExclusive = Math.min(startLine + 3, lineStarts.length);
+    const startWordIndex = lineStarts[startLine] ?? 0;
+    const endWordIndex = lineStarts[endLineExclusive] ?? words.length;
+
+    return { startWordIndex, endWordIndex };
+  }, [currentWordIndex, lineStarts, words.length]);
+
+  const visibleWords = words.slice(visibleWindow.startWordIndex, visibleWindow.endWordIndex);
 
   return (
     <main className="min-h-screen w-full bg-[#ececec] text-[#1f1f1f]">
-      <div className="mx-auto w-full max-w-[1120px] px-4 pb-12 pt-7 md:pt-[72px]">
-        <section className="mx-auto mb-[18px] w-full max-w-[760px] border border-[#d2d2d2] bg-[#efefef] p-3">
-          <div className="mb-3 min-h-[90px]">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[20px] leading-[1.25] text-[#616161] md:text-[35px]">
+      <div className="mx-auto w-full max-w-[1100px] px-4 pb-12 pt-8 md:pt-10">
+        <section className="mx-auto mb-4 w-full max-w-[900px] rounded-[8px] border border-[#cccccc] bg-[#efefef] p-3">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-[6px] border border-[#b7b7b7] bg-[#e4e4e4] p-1">
+              {TIMER_OPTIONS.map((option) => {
+                const active = option === duration;
+
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => selectDuration(option)}
+                    className={`h-8 min-w-[54px] rounded-[4px] border px-3 text-sm font-medium transition ${active ? "border-[#1f1f1f] bg-[#222222] text-white" : "border-transparent bg-transparent text-[#2d2d2d] hover:border-[#bdbdbd] hover:bg-[#ededed]"}`}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="ml-auto inline-flex h-9 items-center rounded-[4px] border border-[#101010] bg-[#111111] px-3 text-sm font-medium text-[#f5f5f5]">
+              {formatClock(timeLeft)}
+            </div>
+            <button
+              type="button"
+              onClick={() => resetSession()}
+              className="h-9 rounded-[4px] border border-[#a7a7a7] bg-[#e7e7e7] px-3 text-sm font-medium text-[#232323] transition hover:bg-[#dddddd]"
+            >
+              Redo
+            </button>
+          </div>
+
+          <div className="rounded-[6px] border border-[#c8c8c8] bg-[#f4f4f4] p-3">
+            <div className="h-[82px] overflow-hidden md:h-[126px]">
+              <div
+                ref={wordsViewportRef}
+                className="flex h-full flex-wrap content-start items-start gap-x-3 gap-y-1 text-[20px] leading-[1.25] text-[#666666] md:text-[34px]"
+              >
               {visibleWords.map((word, offset) => {
-                const index = visibleStart + offset;
+                const index = visibleWindow.startWordIndex + offset;
 
                 if (index < currentWordIndex) {
                   const typed = attempts[index] ?? "";
@@ -267,10 +376,10 @@ export function TypingTest() {
                         const typedChar = typed[charIndex];
                         const charClassName =
                           typedChar === undefined
-                            ? "text-[#cf4545]"
+                            ? "text-[#cc4b4b]"
                             : typedChar === char
-                              ? "text-[#171717]"
-                              : "text-[#cf4545]";
+                              ? "text-[#1b1b1b]"
+                              : "text-[#cc4b4b]";
 
                         return (
                           <span key={`done-${index}-${charIndex}`} className={charClassName}>
@@ -282,7 +391,7 @@ export function TypingTest() {
                         .slice(word.length)
                         .split("")
                         .map((extra, extraIndex) => (
-                          <span key={`done-extra-${index}-${extraIndex}`} className="text-[#cf4545]">
+                          <span key={`done-extra-${index}-${extraIndex}`} className="text-[#cc4b4b]">
                             {extra}
                           </span>
                         ))}
@@ -292,15 +401,18 @@ export function TypingTest() {
 
                 if (index === currentWordIndex) {
                   return (
-                    <div key={`current-${index}`} className="inline-flex rounded-[2px] bg-[#d7d7d7] px-1">
+                    <div
+                      key={`current-${index}`}
+                      className="inline-flex rounded-[3px] bg-[#d8d8d8] text-[#111111]"
+                    >
                       {word.split("").map((char, charIndex) => {
                         const typedChar = currentInput[charIndex];
                         const charClassName =
                           typedChar === undefined
-                            ? "text-[#171717]"
+                            ? "text-[#111111]"
                             : typedChar === char
-                              ? "text-[#171717]"
-                              : "text-[#cf4545]";
+                              ? "text-[#111111]"
+                              : "text-[#c74242]";
 
                         return (
                           <span key={`current-${index}-${charIndex}`} className={charClassName}>
@@ -312,7 +424,7 @@ export function TypingTest() {
                         .slice(word.length)
                         .split("")
                         .map((extra, extraIndex) => (
-                          <span key={`current-extra-${index}-${extraIndex}`} className="text-[#cf4545]">
+                          <span key={`current-extra-${index}-${extraIndex}`} className="text-[#c74242]">
                             {extra}
                           </span>
                         ))}
@@ -321,101 +433,73 @@ export function TypingTest() {
                 }
 
                 return (
-                  <span key={`future-${index}`} className="text-[#616161]">
+                  <span key={`future-${index}`} className="text-[#666666]">
                     {word}
                   </span>
                 );
               })}
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              ref={inputRef}
-              value={currentInput}
-              onChange={(event) => {
-                if (testEnded) {
-                  return;
-                }
-
-                const value = event.target.value.replace(/\s+/g, "");
-
-                if (!isRunning && value.length > 0) {
-                  setIsRunning(true);
-                }
-
-                setCurrentInput(value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === " ") {
-                  event.preventDefault();
-                  completeCurrentWord();
-                  return;
-                }
-
-                if (event.key === "Tab") {
-                  event.preventDefault();
-                  return;
-                }
-
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  resetSession();
-                  return;
-                }
-
-                if (event.key === "Enter") {
-                  event.preventDefault();
+            <div className="mt-3 rounded-[6px] border border-[#b9b9b9] bg-[#e9e9e9] p-2">
+              <input
+                ref={inputRef}
+                value={currentInput}
+                onChange={(event) => {
                   if (testEnded) {
-                    resetSession();
-                  } else {
-                    completeCurrentWord();
+                    return;
                   }
-                }
-              }}
-              className="h-11 flex-1 border border-[#272727] bg-white px-[10px] text-[22px] leading-none text-[#111111] outline-none focus:shadow-[0_0_0_2px_rgba(0,0,0,0.05)] md:text-[34px]"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="Typing input"
-            />
 
-            <button
-              type="button"
-              onClick={cycleDuration}
-              className="h-11 min-w-[54px] cursor-pointer border border-[#111111] bg-black px-[10px] text-sm text-white"
-              title="Change timer"
-            >
-              {formatClock(timeLeft)}
-            </button>
+                  const value = event.target.value.replace(/\s+/g, "");
 
-            <button
-              type="button"
-              onClick={() => resetSession()}
-              className="h-11 cursor-pointer border border-[#ababab] bg-[#e9e9e9] px-[10px] text-sm text-[#222222]"
-            >
-              Redo
-            </button>
+                  if (!isRunning && value.length > 0) {
+                    setIsRunning(true);
+                  }
+
+                  setCurrentInput(value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === " ") {
+                    event.preventDefault();
+                    completeCurrentWord();
+                    return;
+                  }
+
+                  if (event.key === "Tab") {
+                    event.preventDefault();
+                    return;
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    resetSession();
+                    return;
+                  }
+
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    if (testEnded) {
+                      resetSession();
+                    } else {
+                      completeCurrentWord();
+                    }
+                  }
+                }}
+                className="h-14 w-full rounded-[4px] border border-[#262626] bg-white px-3 text-[24px] leading-none text-[#111111] outline-none focus:border-[#111111] focus:shadow-[0_0_0_1px_rgba(0,0,0,0.12)] md:text-[34px]"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Typing input"
+              />
+            </div>
           </div>
         </section>
 
-        <section className="mx-auto mb-5 w-full max-w-[760px] border border-[#d2d2d2] bg-[#efefef] p-3">
-          <div className="flex flex-wrap items-center gap-[10px]">
-            <select
-              value={switchPack}
-              onChange={(event) => setSwitchPack(event.target.value)}
-              className="h-[42px] min-w-[178px] border border-[#b8b8b8] bg-[#f5f5f5] px-3 text-[16px] text-[#222222] md:text-[20px]"
-            >
-              {SWITCH_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-
+        <section className="mx-auto mb-5 w-full max-w-[900px] rounded-[8px] border border-[#cccccc] bg-[#efefef] p-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <select
               value={boardId}
               onChange={(event) => setBoardId(event.target.value)}
-              className="h-[42px] min-w-[178px] border border-[#b8b8b8] bg-[#f5f5f5] px-3 text-[16px] text-[#222222] md:text-[20px]"
+              className="h-[42px] min-w-[178px] rounded-[4px] border border-[#b7b7b7] bg-[#f5f5f5] px-3 text-[14px] text-[#1f1f1f] md:min-w-[340px] md:text-[16px]"
             >
               {KEYBOARD_PROFILES.map((profile) => (
                 <option key={profile.id} value={profile.id}>
@@ -424,19 +508,7 @@ export function TypingTest() {
               ))}
             </select>
 
-            <select
-              value={colorway}
-              onChange={(event) => setColorway(event.target.value as KeyboardColorway)}
-              className="h-[42px] min-w-[178px] border border-[#b8b8b8] bg-[#f5f5f5] px-3 text-[16px] text-[#222222] md:text-[20px]"
-            >
-              {COLOR_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-
-            <label className="ml-0 inline-flex items-center gap-1.5 text-[16px] text-[#3a3a3a] md:ml-auto md:text-[20px]">
+            <label className="ml-0 inline-flex h-[42px] items-center gap-2 rounded-[4px] border border-[#b7b7b7] bg-[#f5f5f5] px-3 text-[14px] font-medium text-[#2f2f2f] md:ml-auto md:text-[15px]">
               <input
                 type="checkbox"
                 checked={muted}
@@ -447,14 +519,14 @@ export function TypingTest() {
             </label>
           </div>
 
-          <p className="mt-2 text-[15px] text-[#565656] md:text-[19px]">
+          <p className="mt-2 text-[14px] text-[#555555] md:text-[16px]">
             {testEnded
               ? `Done - ${Math.round(metrics.wpm)} WPM, ${metrics.accuracy.toFixed(1)}% accuracy.`
-              : `${Math.round(metrics.wpm)} WPM | ${metrics.accuracy.toFixed(1)}% accuracy | ${muted ? "Muted" : switchPack}`}
+              : `${Math.round(metrics.wpm)} WPM | ${metrics.accuracy.toFixed(1)}% accuracy | ${muted ? "Muted" : "Sound On"}`}
           </p>
         </section>
 
-        <MechKeyboard pressedCodes={pressedCodes} profile={activeProfile} colorway={colorway} />
+        <MechKeyboard pressedCodes={pressedCodes} profile={activeProfile} />
       </div>
     </main>
   );
